@@ -33,6 +33,15 @@ class EvalAgent:
         return run_agent(self.graph, question, self.max_iterations, on_message)
 
 
+def create_llm(settings: Settings) -> ChatAnthropic:
+    return ChatAnthropic(
+        model=settings.anthropic_model,
+        anthropic_api_key=settings.anthropic_api_key,
+        # temperature는 보내지 않는다. 일부 최신 모델은 이 파라미터를 거절한다(400 invalid_request_error).
+        max_tokens=1024,  # 답변 길이 상한 = 비용 상한
+    )
+
+
 def create_agent(settings: Settings | None = None) -> EvalAgent:
     settings = settings or get_settings()
     # 비용이 드는 객체를 만들기 전에 설정부터 확인한다.
@@ -45,14 +54,8 @@ def create_agent(settings: Settings | None = None) -> EvalAgent:
     with session_factory() as session:
         years = list(session.scalars(select(EvaluationCycle.year).order_by(EvaluationCycle.year)))
 
-    llm = ChatAnthropic(
-        model=settings.anthropic_model,
-        anthropic_api_key=settings.anthropic_api_key,
-        temperature=0,  # 분석 답변은 같은 질문에 같은 답이 나오는 쪽이 낫다
-        max_tokens=1024,  # 답변 길이 상한 = 비용 상한
-    )
     graph = build_graph(
-        llm,
+        create_llm(settings),
         build_tools(session_factory),
         build_system_prompt(years),
         settings.agent_max_iterations,

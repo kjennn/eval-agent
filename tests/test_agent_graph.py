@@ -12,7 +12,7 @@ from langchain_core.language_models.fake_chat_models import FakeMessagesListChat
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from eval_agent.agent.factory import AgentConfigError, create_agent
+from eval_agent.agent.factory import AgentConfigError, create_agent, create_llm
 from eval_agent.agent.graph import build_graph, format_evidence, message_text, run_agent
 from eval_agent.agent.langchain_tools import build_tools
 from eval_agent.agent.prompts import build_system_prompt
@@ -178,6 +178,14 @@ def test_시스템_프롬프트에_조회_가능_연도와_핵심_규칙이_들�
     assert "2024, 2025" in prompt
     for rule in ["추가 확인이 필요합니다", "개인의 이름", "unit 필드", "자동으로 붙입니다"]:
         assert rule in prompt
+
+
+def test_LLM_요청에는_temperature가_포함되지_않는다():
+    # 일부 최신 모델은 temperature를 보내면 400 오류를 낸다. 실제로 겪은 문제의 회귀 방지 테스트.
+    llm = create_llm(Settings("sqlite://", "dummy-key", "claude-haiku-5-5", 6))
+    payload = llm._get_request_payload([HumanMessage("x")])
+    assert "temperature" not in payload
+    assert payload["max_tokens"] == 1024
 
 
 @pytest.mark.parametrize(
