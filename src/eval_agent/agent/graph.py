@@ -83,31 +83,44 @@ def _error_of(tool_content: Any) -> str | None:
     return str(parsed["error"]) if isinstance(parsed, dict) and "error" in parsed else None
 
 
-def format_evidence(messages: list[BaseMessage]) -> str:
-    """실제로 일어난 도구 호출 기록에서 '근거' 문구를 만든다.
+def collect_tool_calls(messages: list[BaseMessage]) -> list[dict[str, Any]]:
+    """메시지 기록에서 실제로 일어난 도구 호출을 뽑는다: [{"name", "args", "error"}].
 
-    LLM에게 "근거를 써 줘"라고 시키지 않고 코드가 직접 만드는 이유:
-    LLM은 호출하지 않은 도구를 호출했다고 쓰거나 조건을 틀리게 쓸 수 있다. 기록에서 뽑으면 사실만 남는다.
+    같은 조건의 중복 호출은 한 번만 담고, 값이 None인 인자는 뺀다.
+    error는 도구 결과가 에러였을 때만 코드(예: "no_data")가 들어가고 아니면 None이다.
     """
     results = {m.tool_call_id: m.content for m in messages if isinstance(m, ToolMessage)}
     seen: set[tuple[str, str]] = set()
-    lines: list[str] = []
+    calls: list[dict[str, Any]] = []
     for message in messages:
         if not isinstance(message, AIMessage):
             continue
         for call in message.tool_calls:
             args = {k: v for k, v in call["args"].items() if v is not None}
             key = (call["name"], json.dumps(args, sort_keys=True, ensure_ascii=False))
-            if key in seen:  # 같은 조건의 중복 호출은 한 번만 보여준다
+            if key in seen:
                 continue
             seen.add(key)
-            arg_text = ", ".join(f"{k}={v!r}" for k, v in args.items())
-            line = f"- {call['name']}({arg_text})"
-            if error := _error_of(results.get(call["id"])):
-                line += f" → 오류: {error}"
-            lines.append(line)
-    if not lines:
+            calls.append({"name": call["name"], "args": args, "error": _error_of(results.get(call["id"]))})
+    return calls
+
+
+def format_evidence(messages: list[BaseMessage]) -> str:
+    """실제로 일어난 도구 호출 기록에서 '근거' 문구를 만든다.
+
+    LLM에게 "근거를 써 줘"라고 시키지 않고 코드가 직접 만드는 이유:
+    LLM은 호출하지 않은 도구를 호출했다고 쓰거나 조건을 틀리게 쓸 수 있다. 기록에서 뽑으면 사실만 남는다.
+    """
+    calls = collect_tool_calls(messages)
+    if not calls:
         return "근거: 도구를 호출하지 않았습니다."
+    lines = []
+    for call in calls:
+        arg_text = ", ".join(f"{k}={v!r}" for k, v in call["args"].items())
+        line = f"- {call['name']}({arg_text})"
+        if call["error"]:
+            line += f" → 오류: {call['error']}"
+        lines.append(line)
     return "근거(호출한 도구와 조건):\n" + "\n".join(lines)
 
 
