@@ -31,8 +31,8 @@
 | 2 | 스키마 + 더미 데이터 시드 스크립트 | 완료 |
 | 3 | 도구 4개 + pytest | 완료 |
 | 4 | LangGraph 에이전트 + CLI | 완료 |
-| 5 | FastAPI 엔드포인트 `POST /ask` | 구현 완료 (실제 Claude로 호출 검증 진행 중) |
-| 6 | MCP 서버 (Claude Desktop/Claude Code에서 도구 사용) | 예정 |
+| 5 | FastAPI 엔드포인트 `POST /ask` | 완료 |
+| 6 | MCP 서버 (Claude Desktop/Claude Code에서 도구 사용) | 구현 완료 (Claude Desktop/Code 연결 검증 진행 중) |
 | 7 | README 정리: 구조 그림, 설계 결정과 이유, 한계와 다음 단계 | 예정 |
 
 README의 상세 설계 설명은 7단계에서 정리한다. 아래는 단계별 실행 방법이다.
@@ -204,4 +204,75 @@ uv run pytest        # TestClient로 입력 검증, 오류 처리, HTTP부터 �
 - 인증, 호출 횟수 제한(rate limit)이 없다. 외부에 공개하려면 둘 다 필요하다.
 - 질문마다 독립 실행이며 대화 기억이 없다.
 - 요청 처리 중에는 LLM 응답을 기다리는 동안 스레드가 점유된다. 동시 요청이 많아지면 스레드 풀 크기가 한계가 된다.
+
+## 6단계: MCP 서버
+
+3단계의 도구 4개를 MCP(Model Context Protocol) 서버로 노출한다. Claude Desktop이나 Claude Code가 에이전트(4~5단계) 없이 이 도구를 직접 쓸 수 있다.
+
+### 에이전트와 MCP 서버의 차이
+
+| | 에이전트 (4~5단계) | MCP 서버 (6단계) |
+|---|---|---|
+| LLM이 있는 곳 | 우리 서버 (Claude API를 우리가 호출) | Claude Desktop/Code 쪽 |
+| 우리가 제공하는 것 | 질문 → 최종 답변 | 도구 목록과 도구 실행 |
+| Claude API 키·비용 | 필요 (우리 계정) | 필요 없음 |
+| 반복 한도, 답변 규칙 프롬프트 | 우리가 관리 | 클라이언트(Claude)가 관리 |
+
+같은 도구 로직(3단계)을 두 방식이 공유하고, 도구 설명 문구도 `tools/descriptions.py` 한 곳에서 가져온다.
+
+### 실행과 연결
+
+서버는 stdio 방식이다. Claude Desktop/Code가 이 프로세스를 직접 실행하고 표준 입출력으로 통신한다. 네트워크 포트를 열지 않아서 내 PC 밖에서는 접속할 수 없다. DB(`docker compose up -d`)는 켜져 있어야 한다.
+
+직접 실행해 보기(연결 없이 서버가 뜨는지만 확인, 종료는 Ctrl+C):
+
+```bash
+uv run python -m eval_agent.mcp_server
+```
+
+**Claude Desktop** — 설정 파일(macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`, 앱의 Settings → Developer → Edit Config로도 열린다)에 추가한다. 경로는 모두 절대 경로로 쓴다. `command`는 `which uv`로 나온 절대 경로를 권장한다(앱이 터미널과 다른 PATH로 실행될 수 있다).
+
+```json
+{
+  "mcpServers": {
+    "eval-agent": {
+      "command": "/절대/경로/uv",
+      "args": ["--directory", "/Users/내이름/workspace/eval-agent", "run", "python", "-m", "eval_agent.mcp_server"]
+    }
+  }
+}
+```
+
+저장한 뒤 Claude Desktop을 완전히 종료했다가 다시 실행한다. 로그는 `~/Library/Logs/Claude/mcp*.log`에서 볼 수 있다.
+
+**Claude Code**
+
+```bash
+claude mcp add --transport stdio eval-agent -- /절대/경로/uv --directory /Users/내이름/workspace/eval-agent run python -m eval_agent.mcp_server
+claude mcp list        # ✔ Connected 이면 연결됨
+```
+
+Claude Code 안에서는 `/mcp`로 서버 상태와 도구 개수를 볼 수 있다.
+
+연결한 뒤에는 "2025년 본부별 B등급 비율을 비교해줘" 같은 질문을 하면, Claude가 이 서버의 도구를 골라 호출한다.
+
+### 설계 결정
+
+- **도구 로직은 그대로 두고 얇은 어댑터만 더한다.** `get_grade_distribution` 등 3단계 함수는 건드리지 않고, `mcp_server/server.py`가 세션을 열어 호출한 뒤 결과 dict를 돌려준다.
+- **도구 설명은 에이전트와 MCP가 공유한다.** 한쪽만 고쳐서 두 곳의 동작이 어긋나는 일을 막고, 테스트가 두 설명이 같은지 검사한다.
+- **데이터 없음은 오류가 아니라 안내 결과로 돌려준다.** 에이전트와 같은 방식이라, 클라이언트의 LLM이 "조회 가능한 연도"를 읽고 스스로 복구할 수 있다. 반면 필수 인자 누락이나 타입 오류는 MCP의 오류 응답(`is_error`)으로 거절된다.
+- **stdout은 프로토콜 전용이다.** 서버 코드에서 `print()`를 쓰면 메시지가 깨져 연결이 끊긴다. 실제 프로세스를 띄워 통신하는 테스트가 이를 지킨다.
+- **SDK 이름 변경:** mcp 2.x에서는 `FastMCP`가 `MCPServer`로 바뀌었다. 이 프로젝트는 2.x(`from mcp.server.mcpserver import MCPServer`)를 쓴다.
+
+### 테스트
+
+```bash
+uv run pytest        # 인메모리 클라이언트 + 실제 stdio 프로세스로 도구 목록, 호출 결과, 오류 처리를 검증한다
+```
+
+### 한계
+
+- 서버가 DB에 쓰는 계정을 따로 제한하지 않는다. 도구가 읽기 전용 함수라서 안전하지만, 운영 환경이라면 DB 계정 자체를 읽기 전용으로 분리하는 것이 안전하다.
+- 인증이 없다. stdio 방식이라 로컬 프로세스 간 통신에 한정되고, 원격(HTTP)으로 공개하려면 인증이 필요하다.
+- 데이터는 더미 데이터이고 실제 고객사 데이터를 연결하지 않았다.
 

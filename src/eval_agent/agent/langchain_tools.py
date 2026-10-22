@@ -4,7 +4,7 @@
 - LLM은 파이썬 함수를 직접 부르지 못한다. LLM에게는 "도구 이름 + 설명 + 파라미터 스키마"만 보이고,
   LLM이 도구 호출을 요청하면 우리 코드가 대신 실행해서 결과를 돌려준다.
 - 이 파일이 그 '이름 + 설명 + 스키마'를 만든다. 스키마는 함수 시그니처(타입힌트)에서 자동으로 만들어지고,
-  **독스트링이 곧 LLM에게 보이는 도구 설명**이다. (Java로 치면 OpenAPI 스펙을 코드에서 뽑는 것과 비슷)
+  설명은 tools/descriptions.py의 문구를 쓴다(MCP 서버와 공유). (Java로 치면 OpenAPI 스펙을 코드에서 뽑는 것과 비슷)
 - 3단계 도구는 DB 세션을 인자로 받으므로, 여기서 호출할 때마다 세션을 열고 닫아 준다.
 
 새 문법 메모
@@ -26,6 +26,7 @@ from eval_agent.tools import (
     get_org_summary,
     search_policy_docs,
 )
+from eval_agent.tools.descriptions import TOOL_DESCRIPTIONS
 
 SessionFactory = Callable[[], Session]
 
@@ -36,49 +37,25 @@ def _dump(result: dict[str, Any]) -> str:
 
 
 def build_tools(session_factory: SessionFactory) -> list[BaseTool]:
-    @tool("get_grade_distribution")
+    @tool("get_grade_distribution", description=TOOL_DESCRIPTIONS["get_grade_distribution"])
     def _get_grade_distribution(
         year: int, org_name: str | None = None, eval_type: str | None = None
     ) -> str:
-        """등급(S/A/B/C/D)별 인원(건수)과 비율을 조회한다.
-
-        - year: 평가 연도 (예: 2025)
-        - org_name: 본부명 또는 팀명. 생략하면 회사 전체. 생략하거나 본부를 지정하면 하위 조직(본부별/팀별)
-          분포가 breakdown에 함께 나오므로, 여러 본부를 비교할 때는 org_name을 생략하고 한 번만 호출한다.
-        - eval_type: '역량', '성과', '다면' 중 하나. 생략하면 세 유형을 합산하며, 이때 결과의 unit은
-          '인원'이 아니라 '평가 건수'다.
-        """
         with session_factory() as session:
             return _dump(get_grade_distribution(session, year, org_name, eval_type))
 
-    @tool("compare_years")
+    @tool("compare_years", description=TOOL_DESCRIPTIONS["compare_years"])
     def _compare_years(org_name: str, year_from: int, year_to: int) -> str:
-        """한 조직(본부 또는 팀)의 두 연도 등급 분포를 비교한다.
-
-        등급별로 두 연도의 비율과 변화량(diff_pct_point, 단위 %p)을 돌려준다.
-        - org_name: 본부명 또는 팀명 (필수)
-        - year_from: 비교 기준 연도, year_to: 비교 대상 연도
-        """
         with session_factory() as session:
             return _dump(compare_years(session, org_name, year_from, year_to))
 
-    @tool("get_org_summary")
+    @tool("get_org_summary", description=TOOL_DESCRIPTIONS["get_org_summary"])
     def _get_org_summary(year: int, org_name: str) -> str:
-        """조직(본부 또는 팀)의 평가 대상 인원수, 전체 평균 점수, 평가유형(역량/성과/다면)별 평균 점수를 조회한다.
-
-        - year: 평가 연도, org_name: 본부명 또는 팀명 (둘 다 필수)
-        """
         with session_factory() as session:
             return _dump(get_org_summary(session, year, org_name))
 
-    @tool("search_policy_docs")
+    @tool("search_policy_docs", description=TOOL_DESCRIPTIONS["search_policy_docs"])
     def _search_policy_docs(query: str) -> str:
-        """평가 기준 문서(등급 배분 가이드, 본부별 예외 규정, 평가 유형과 반영 비율, 보정·이의신청)에서
-        질문과 관련된 문단을 키워드로 검색한다.
-
-        - query: 핵심 키워드를 공백으로 구분해 넣는다. 조사를 빼고 명사 위주로 쓴다. (예: '영업본부 B등급 허용 상한')
-        기준 수치(허용 비율, 예외 규정 등)를 말하기 전에 반드시 이 도구로 확인한다.
-        """
         return _dump(search_policy_docs(query))
 
     return [_get_grade_distribution, _compare_years, _get_org_summary, _search_policy_docs]
