@@ -34,3 +34,18 @@ uv run python scripts/seed.py --reset    # 전체 삭제 후 재생성 ('yes' �
 - 모든 데이터는 가짜이며, 같은 seed로 항상 같은 결과가 나온다.
 - 영업본부는 2025년 B등급 비율이 약 68%로 일부러 높게 만들었다.
 
+## 3단계: 도구 4개
+
+모든 도구는 정해진 파라미터만 받는 읽기 전용 함수이고, 개인 이름 없이 집계만 돌려준다. 조회가 안 되면 예외 대신 `{"error": ...}`를 돌려줘서 LLM이 "데이터가 없다"고 답할 수 있게 한다.
+
+| 도구 | 파라미터 | 결과 |
+|------|----------|------|
+| `get_grade_distribution` | year, org_name?, eval_type? | 등급별 인원·비율, 하위 조직별 breakdown |
+| `compare_years` | org_name, year_from, year_to | 두 연도 분포와 등급별 변화(%p) |
+| `get_org_summary` | year, org_name | 인원수, 평균 점수, 평가유형별 평균 |
+| `search_policy_docs` | query, top_k? | 기준 문서에서 관련 문단 (키워드 검색) |
+
+```bash
+uv run pytest        # DB 없이 메모리 SQLite로 도구를 검증한다
+```
+
