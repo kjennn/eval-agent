@@ -20,6 +20,7 @@ class Settings:
     anthropic_api_key: str
     anthropic_model: str
     agent_max_iterations: int
+    agent_max_tokens: int = 2048  # LLM 답변 한 번의 최대 길이(토큰). 비용 상한 역할도 한다.
 
 
 def get_settings() -> Settings:
@@ -35,4 +36,5 @@ def get_settings() -> Settings:
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
         anthropic_model=os.environ.get("ANTHROPIC_MODEL", ""),
         agent_max_iterations=int(os.environ.get("AGENT_MAX_ITERATIONS", "6")),
+        agent_max_tokens=int(os.environ.get("AGENT_MAX_TOKENS", "2048")),
     )

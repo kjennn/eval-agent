@@ -38,7 +38,7 @@ def create_llm(settings: Settings) -> ChatAnthropic:
         model=settings.anthropic_model,
         anthropic_api_key=settings.anthropic_api_key,
         # temperature는 보내지 않는다. 일부 최신 모델은 이 파라미터를 거절한다(400 invalid_request_error).
-        max_tokens=1024,  # 답변 길이 상한 = 비용 상한
+        max_tokens=settings.agent_max_tokens,  # 답변 길이 상한 = 비용 상한 (.env의 AGENT_MAX_TOKENS)
     )
 
 

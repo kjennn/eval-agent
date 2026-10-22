@@ -176,7 +176,7 @@ def test_도구_래퍼를_호출하면_JSON_문자열이_돌아온다(session_fa
 def test_시스템_프롬프트에_조회_가능_연도와_핵심_규칙이_들어_있다():
     prompt = build_system_prompt([2024, 2025])
     assert "2024, 2025" in prompt
-    for rule in ["추가 확인이 필요합니다", "개인의 이름", "unit 필드", "자동으로 붙입니다"]:
+    for rule in ["추가 확인이 필요합니다", "개인의 이름", "unit 필드", "자동으로 붙입니다", "10줄 이내"]:
         assert rule in prompt
 
 
@@ -185,7 +185,27 @@ def test_LLM_요청에는_temperature가_포함되지_않는다():
     llm = create_llm(Settings("sqlite://", "dummy-key", "claude-haiku-5-5", 6))
     payload = llm._get_request_payload([HumanMessage("x")])
     assert "temperature" not in payload
-    assert payload["max_tokens"] == 1024
+    assert payload["max_tokens"] == 2048  # Settings 기본값
+
+
+def test_답변_최대_길이는_설정으로_바꿀_수_있다():
+    llm = create_llm(Settings("sqlite://", "dummy-key", "claude-haiku-5-5", 6, agent_max_tokens=3000))
+    assert llm._get_request_payload([HumanMessage("x")])["max_tokens"] == 3000
+
+
+def test_답변이_max_tokens로_잘리면_그_사실을_답변에_표시한다(session_factory):
+    cut = AIMessage(content="따라서 영업본부 전체는 상한", response_metadata={"stop_reason": "max_tokens"})
+    _, graph = make_agent(session_factory, [cut])
+    answer = run_agent(graph, "질문", 6)["answer"]
+    assert "따라서 영업본부 전체는 상한" in answer
+    assert "길이 제한(max_tokens)에 걸려 중간에 잘렸습니다" in answer
+    assert "AGENT_MAX_TOKENS" in answer
+
+
+def test_정상_종료된_답변에는_잘림_안내가_붙지_않는다(session_factory):
+    ok = AIMessage(content="완성된 답변입니다.", response_metadata={"stop_reason": "end_turn"})
+    _, graph = make_agent(session_factory, [ok])
+    assert "잘렸습니다" not in run_agent(graph, "질문", 6)["answer"]
 
 
 @pytest.mark.parametrize(

@@ -64,6 +64,12 @@ def message_text(message: BaseMessage) -> str:
     )
 
 
+def _was_truncated(message: BaseMessage) -> bool:
+    """Anthropic은 답변이 max_tokens에 걸려 끊기면 응답 메타데이터의 stop_reason에 'max_tokens'를 담아 준다."""
+    metadata = getattr(message, "response_metadata", None) or {}
+    return metadata.get("stop_reason") == "max_tokens"
+
+
 def _error_of(tool_content: Any) -> str | None:
     """도구 결과가 에러면 그 코드를 돌려준다. (3단계 도구는 {"error": "no_data", ...} 형태로 알린다)"""
     if not isinstance(tool_content, str):
@@ -131,7 +137,11 @@ def build_graph(
         return "tools"
 
     def finalize_node(state: AgentState) -> dict[str, Any]:
-        text = message_text(state["messages"][-1]).strip()
+        last = state["messages"][-1]
+        text = message_text(last).strip()
+        if _was_truncated(last):
+            # 길이 제한에 걸려 답변이 중간에 끊겼다. 끊긴 문장을 완성된 답변처럼 보여 주지 않고 사실을 알린다.
+            text += "\n\n※ 답변이 길이 제한(max_tokens)에 걸려 중간에 잘렸습니다. 질문을 나누어 다시 묻거나 AGENT_MAX_TOKENS를 늘려 주세요."
         return {"answer": f"{text}\n\n{format_evidence(state['messages'])}"}
 
     def limit_node(state: AgentState) -> dict[str, Any]:
