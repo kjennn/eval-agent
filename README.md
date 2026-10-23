@@ -402,6 +402,10 @@ claude mcp list        # Connected 로 나오면 연결됨
 
 연결한 뒤 "2025년 본부별 B등급 비율을 비교해줘" 같은 질문을 하면 Claude가 이 서버의 도구를 골라 호출합니다.
 
+Claude Desktop에서 실제로 질문한 화면입니다. Claude가 `Eval agent: Get grade distribution` 도구를 호출해서 영업본부의 2024년 B등급 비율(51.7%)을 답했습니다. 이 답변에는 3단계 도구에서 정한 단위 설명(평가 건수 기준)이 그대로 반영되어 있습니다.
+
+![Claude Desktop에서 MCP 도구를 호출한 화면](docs/images/claude-desktop-mcp.png)
+
 ### 이 단계에서 정한 것
 
 - 3단계 함수는 건드리지 않고 `mcp_server/server.py`에 얇은 어댑터만 더했습니다. 세션을 열어 함수를 호출하고 결과 dict를 돌려줍니다.
