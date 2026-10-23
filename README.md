@@ -1,5 +1,7 @@
 # eval-agent
 
+![eval-agent 전체 구조](docs/images/architecture.svg)
+
 평가 데이터를 자연어로 물어보면, LLM이 필요한 도구를 직접 골라 DB를 조회하고 근거와 함께 답해 주는 서비스. 
 Python, LangGraph, MCP를 사용했습니다.
 
