@@ -13,7 +13,13 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from eval_agent.config import get_settings
-from eval_agent.rag.store import NotIndexedError, VectorBase, index_chunks, vector_search
+from eval_agent.rag.store import (
+    NotIndexedError,
+    VectorBase,
+    index_chunks,
+    search_by_vector,
+    vector_search,
+)
 from eval_agent.tools.policy import load_chunks
 from tests.fake_embedder import FakeEmbedder
 
@@ -39,7 +45,10 @@ def test_색인한_문단_수는_문서의_문단_수와_같다(pg_session):
 
 def test_코사인_거리가_가까운_문단이_먼저_나온다(pg_session):
     index_chunks(pg_session, FakeEmbedder(), load_chunks())
-    results = vector_search(pg_session, FakeEmbedder(), "영업본부 B등급 상한 예외", top_k=3)
+    # 유사도 하한은 voyage-4 기준이라, 점수가 낮게 나오는 가짜 임베더에서는 끄고 정렬만 확인한다
+    emb = FakeEmbedder()
+    qvec = emb.embed_query("영업본부 B등급 상한 예외")
+    results = search_by_vector(pg_session, emb.model, qvec, top_k=3, min_similarity=0.0)
     assert results[0]["source"] == "02-org-exceptions.md"
     scores = [r["score"] for r in results]
     assert scores == sorted(scores, reverse=True) and all(0 < s <= 1 for s in scores)
@@ -51,3 +60,11 @@ def test_다른_모델로_만든_색인은_쓰지_않는다(pg_session):
     other.model = "another-model"
     with pytest.raises(NotIndexedError):
         vector_search(pg_session, other, "영업본부")
+
+
+def test_유사도_하한보다_낮은_문단은_돌려주지_않는다(pg_session):
+    emb = FakeEmbedder()
+    index_chunks(pg_session, emb, load_chunks())
+    qvec = emb.embed_query("영업본부 B등급 상한 예외")
+    assert search_by_vector(pg_session, emb.model, qvec, top_k=3, min_similarity=0.0)
+    assert search_by_vector(pg_session, emb.model, qvec, top_k=3, min_similarity=0.99) == []

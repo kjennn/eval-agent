@@ -21,14 +21,15 @@ Java/Spring 개발자 기준으로, 이 프로젝트의 파일이 무엇에 해�
 | `src/eval_agent/` | `src/main/java/.../` | 실제 코드. 폴더 하나가 패키지 하나입니다. |
 | `__init__.py` | 패키지 표시 | 이 파일이 있는 폴더를 패키지로 인식합니다. 안에서 "외부에 공개할 것"만 골라 내보내는 용도로도 씁니다. |
 | `models.py` | `@Entity` 클래스들 | SQLAlchemy로 테이블을 클래스로 정의합니다. JPA와 같은 역할입니다. |
-| `tools/` | Service | 도구 4개. DB를 조회해서 결과 dict를 돌려주는 함수들입니다. 클래스가 아니라 함수로 만들었습니다. |
+| `tools/` | Service | 도구 5개. DB를 조회해서 결과 dict를 돌려주는 함수들입니다. 클래스가 아니라 함수로 만들었습니다. |
+| `rag/` | (임베딩 검색) | 임베딩 모델 인터페이스(`Embedder`)와 pgvector 저장·검색. 기준 문서 검색 도구가 씁니다. |
 | `agent/` | (에이전트 로직) | LangGraph로 "LLM 호출 → 도구 실행 → 다시 LLM 호출" 흐름을 만듭니다. |
 | `api/` | Controller | FastAPI. Spring MVC의 `@RestController`와 비슷합니다. |
 | `mcp_server/` | Controller (다른 프로토콜) | 같은 도구를 MCP 형식으로 노출합니다. |
 | `config.py` | `@ConfigurationProperties` | `.env`에서 설정을 읽어 한 곳에 모읍니다. |
 | `scripts/` | main 클래스들 | 시드, CLI처럼 직접 실행하는 파일. |
 | `tests/` | `src/test/java` | pytest 테스트. `conftest.py`는 테스트 공통 준비(DB 등)를 두는 파일입니다. |
-| `docs/policy/` | (검색 대상 문서) | 기준 문서 4개. `search_policy_docs`가 여기서 찾습니다. |
+| `docs/policy/` | (검색 대상 문서) | 기준 문서 4개. `index_policy.py`가 임베딩해서 pgvector에 넣고, `search_policy_docs`가 찾습니다. |
 
 ## 질문 하나가 처리되는 흐름
 

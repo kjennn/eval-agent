@@ -27,3 +27,6 @@ class FakeEmbedder:
 
     def embed_query(self, text: str) -> list[float]:
         return self._vec(text)
+
+    def embed_queries(self, texts: list[str]) -> list[list[float]]:
+        return [self._vec(t) for t in texts]

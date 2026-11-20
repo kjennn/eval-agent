@@ -4,6 +4,7 @@
     uv run python scripts/compare_search.py "질문 하나만 따로 비교"
 
 index_policy.py로 색인을 먼저 만들어야 한다. 질문마다 Voyage API를 한 번 호출한다(무료 토큰 안).
+결제 수단을 등록하지 않은 Voyage 계정은 분당 3회로 제한되므로, 모든 질문을 요청 한 번으로 묶어 임베딩한다.
 """
 
 import sys
@@ -13,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 
 from eval_agent.config import get_settings
 from eval_agent.rag.embedder import create_embedder
-from eval_agent.rag.store import vector_search
+from eval_agent.rag.store import search_by_vector
 from eval_agent.tools.policy import keyword_search
 
 # (질문, 기대하는 1순위 '파일명 / 소제목' 일부, 무엇을 보려는 질문인가)
@@ -42,11 +43,12 @@ def main() -> int:
     session_factory = sessionmaker(create_engine(settings.database_url))
 
     cases = [(q, "?", "직접 입력") for q in sys.argv[1:]] or CASES
-    for question, expected, why in cases:
+    qvecs = embedder.embed_queries([q for q, _, _ in cases])  # API 호출은 여기서 한 번뿐
+    for (question, expected, why), qvec in zip(cases, qvecs, strict=True):
         print(f"\n=== {question}\n    기대: {expected}  ({why})")
         kw = keyword_search(question, top_k=3)["results"]
         with session_factory() as session:
-            vec = vector_search(session, embedder, question, top_k=3)
+            vec = search_by_vector(session, embedder.model, qvec, top_k=3)
         print("  [키워드]  점수=키워드수x100+등장횟수")
         for line in _fmt(kw):
             print("   ", line)
