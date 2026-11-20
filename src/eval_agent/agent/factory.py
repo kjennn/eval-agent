@@ -16,6 +16,7 @@ from eval_agent.agent.langchain_tools import build_tools
 from eval_agent.agent.prompts import build_system_prompt
 from eval_agent.config import Settings, get_settings
 from eval_agent.models import EvaluationCycle
+from eval_agent.rag.embedder import create_embedder
 
 
 class AgentConfigError(RuntimeError):
@@ -56,7 +57,7 @@ def create_agent(settings: Settings | None = None) -> EvalAgent:
 
     graph = build_graph(
         create_llm(settings),
-        build_tools(session_factory),
+        build_tools(session_factory, create_embedder(settings)),
         build_system_prompt(years),
         settings.agent_max_iterations,
     )

@@ -25,6 +25,7 @@ from eval_agent.tools import (
     run_sql,
     search_policy_docs,
 )
+from eval_agent.rag.embedder import Embedder
 from eval_agent.tools.descriptions import TOOL_DESCRIPTIONS
 
 SessionFactory = Callable[[], Session]
@@ -36,7 +37,7 @@ INSTRUCTIONS = (
 )
 
 
-def create_server(session_factory: SessionFactory) -> MCPServer:
+def create_server(session_factory: SessionFactory, embedder: Embedder | None = None) -> MCPServer:
     """session_factory를 밖에서 받는다. 테스트에서는 메모리 DB를, 실행할 때는 PostgreSQL을 꽂는다."""
     server = MCPServer("eval-agent", instructions=INSTRUCTIONS)
 
@@ -61,7 +62,7 @@ def create_server(session_factory: SessionFactory) -> MCPServer:
 
     @server.tool(name="search_policy_docs", description=TOOL_DESCRIPTIONS["search_policy_docs"])
     def _search_policy_docs(query: str) -> dict[str, Any]:
-        return search_policy_docs(query)
+        return search_policy_docs(query, session_factory=session_factory, embedder=embedder)
 
     @server.tool(name="run_sql", description=TOOL_DESCRIPTIONS["run_sql"])
     def _run_sql(sql: str) -> dict[str, Any]:

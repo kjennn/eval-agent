@@ -27,6 +27,7 @@ from eval_agent.tools import (
     run_sql,
     search_policy_docs,
 )
+from eval_agent.rag.embedder import Embedder
 from eval_agent.tools.descriptions import TOOL_DESCRIPTIONS
 
 SessionFactory = Callable[[], Session]
@@ -37,7 +38,9 @@ def _dump(result: dict[str, Any]) -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
-def build_tools(session_factory: SessionFactory) -> list[BaseTool]:
+def build_tools(session_factory: SessionFactory, embedder: Embedder | None = None) -> list[BaseTool]:
+    """embedder를 넘기면 기준 문서 검색이 임베딩 검색을 쓴다. None이면 키워드 검색만 쓴다."""
+
     @tool("get_grade_distribution", description=TOOL_DESCRIPTIONS["get_grade_distribution"])
     def _get_grade_distribution(
         year: int, org_name: str | None = None, eval_type: str | None = None
@@ -57,7 +60,7 @@ def build_tools(session_factory: SessionFactory) -> list[BaseTool]:
 
     @tool("search_policy_docs", description=TOOL_DESCRIPTIONS["search_policy_docs"])
     def _search_policy_docs(query: str) -> str:
-        return _dump(search_policy_docs(query))
+        return _dump(search_policy_docs(query, session_factory=session_factory, embedder=embedder))
 
     @tool("run_sql", description=TOOL_DESCRIPTIONS["run_sql"])
     def _run_sql(sql: str) -> str:

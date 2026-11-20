@@ -11,11 +11,13 @@ from sqlalchemy.orm import sessionmaker
 
 from eval_agent.config import get_settings
 from eval_agent.mcp_server.server import create_server
+from eval_agent.rag.embedder import create_embedder
 
 
 def main() -> None:
-    session_factory = sessionmaker(create_engine(get_settings().database_url))
-    create_server(session_factory).run(transport="stdio")
+    settings = get_settings()
+    session_factory = sessionmaker(create_engine(settings.database_url))
+    create_server(session_factory, create_embedder(settings)).run(transport="stdio")
 
 
 if __name__ == "__main__":
