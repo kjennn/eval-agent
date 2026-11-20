@@ -1,0 +1,204 @@
+# 임베딩 검색으로 바꾸기 (작업 기록)
+
+기준 문서 검색(`search_policy_docs`)을 키워드 검색에서 **임베딩(벡터) 검색**으로 바꾼 과정을 단계별로 적은 기록입니다. 브랜치는 `feature/embedding-search`입니다.
+
+| 단계 | 내용 | 상태 |
+|------|------|------|
+| 0 | Voyage AI 가입과 API 키 발급 | 사용자 진행 필요 |
+| 1 | DB 이미지를 pgvector로 교체 | 완료 |
+| 2 | 벡터 테이블 `policy_chunk` | 완료 |
+| 3 | `Embedder` 인터페이스와 Voyage 구현체 | 완료 |
+| 4 | 색인 스크립트 `index_policy.py` | 완료 (실행은 키 발급 후) |
+| 5 | `search_policy_docs`를 임베딩 우선 + 키워드 대체로 교체 | 완료 |
+| 6 | 테스트 | 완료 (105개 통과) |
+| 7 | 키워드 vs 임베딩 비교 | 키워드 쪽만 확인, 임베딩은 키 발급 후 |
+
+## 왜 바꾸나
+
+키워드 검색은 "질문에 들어 있는 글자가 문단에 있는가"만 봅니다. 그래서 아래처럼 사람이 실제로 묻는 말투에 약합니다. (7단계에서 실제로 확인한 결과)
+
+- "영업본부**가** B를 많이 줘도 돼?" → 결과 **0건**. "영업본부가"는 "영업본부"와 다른 글자이고, "B"는 한 글자라 키워드에서 빠집니다.
+- "평가 결과가 **억울하면** 어떻게 해?" → 1위가 "보정 회의" 절. 정답인 "이의신청" 절은 3위 안에도 없습니다.
+
+임베딩 검색은 문장을 **의미를 담은 숫자 벡터**로 바꾸고, 벡터끼리 가까운 정도(코사인 유사도)로 찾습니다. 글자가 달라도 뜻이 비슷하면 가깝게 나옵니다.
+
+```
+[미리 한 번]  문단 20개 ──임베딩 모델──▶ 벡터 20개 ──▶ pgvector 테이블에 저장 (색인)
+[질문마다]    질문 ──임베딩 모델──▶ 질문 벡터 ──▶ 코사인 거리가 가장 가까운 문단 3개
+```
+
+문단 20개는 사실 벡터DB가 필요한 규모가 아닙니다(메모리에서 계산해도 충분). 이번 작업은 **pgvector를 직접 써 보는 것**이 목적이라 일부러 DB에 넣었습니다. 이미 PostgreSQL이 있어서 인프라가 늘지 않습니다.
+
+## 0단계: Voyage AI 가입과 API 키 발급
+
+Anthropic은 임베딩 API를 제공하지 않고, 공식 문서에서 Voyage AI를 권장합니다. (확인일 2026-11-20, [Voyage 문서](https://docs.voyageai.com/docs/api-key-and-installation))
+
+1. [dashboard.voyageai.com](https://dashboard.voyageai.com)에 가입하고 로그인합니다.
+2. 대시보드의 **API keys** 메뉴([바로가기](https://dashboard.voyageai.com/organization/api-keys))에서 **Create new secret key**를 누릅니다.
+3. 키는 만들 때 한 번만 보이니 바로 복사합니다.
+4. 프로젝트 `.env`에 두 줄을 추가합니다. 키는 `.env`에만 넣고 코드나 커밋에는 넣지 않습니다.
+
+   ```
+   VOYAGE_API_KEY=발급받은_키
+   EMBEDDING_MODEL=voyage-4
+   ```
+
+| 항목 | 내용 (Voyage 문서 기준) |
+|------|------|
+| 모델 | `voyage-4`: 범용·다국어 검색용. 더 좋은 품질은 `voyage-4-large`, 더 싸고 빠른 건 `voyage-4-lite` |
+| 벡터 차원 | 1024 (기본값). 256, 512, 2048도 가능 |
+| 무료 토큰 | 계정마다 `voyage-4` 계열 첫 2억 토큰 무료. 이 프로젝트의 문서 전체는 수천 토큰 수준 |
+| 유료 단가 | 무료 초과 시 `voyage-4` 100만 토큰당 $0.06 |
+| 결제 수단 | 무료 사용에 결제 수단이 필요한지, 없을 때 속도 제한이 있는지는 문서에 나와 있지 않습니다. 가입 화면에서 확인하세요. |
+
+`voyage-4`를 고른 이유: 다국어(한국어) 검색을 지원하는 범용 모델 중 중간 등급입니다. 문단이 20개뿐이라 `large`와 품질 차이가 드러나기 어렵고, 모델을 바꾸려면 `.env`만 고치고 색인을 다시 만들면 됩니다.
+
+## 1단계: DB 이미지를 pgvector로 교체
+
+`docker-compose.yml`의 이미지를 `postgres:16` → `pgvector/pgvector:pg16`으로 바꿨습니다. pgvector 이미지는 PostgreSQL 16에 `vector` 확장을 미리 설치해 둔 것입니다.
+
+```bash
+docker compose up -d     # 이미지가 바뀌어서 컨테이너를 새로 만든다. 데이터는 볼륨에 있어서 유지된다.
+```
+
+- 같은 PostgreSQL 16이라 기존 볼륨(`eval-agent_pgdata`)을 그대로 읽습니다. 시드 데이터 1500건이 유지된 것을 확인했습니다.
+- 확장은 DB마다 한 번 켭니다: `CREATE EXTENSION IF NOT EXISTS vector;` (4단계 색인 스크립트가 자동으로 실행합니다). 설치된 버전은 0.8.7이었습니다.
+
+**겪은 문제: collation version mismatch 경고**
+
+```
+WARNING:  database "eval_agent" has a collation version mismatch
+DETAIL:  The database was created using collation version 2.41, but the operating system provides version 2.36.
+```
+
+- 원인: 두 이미지의 기반 OS가 다릅니다. 기존 `postgres:16`은 glibc 2.41, pgvector 이미지는 glibc 2.36입니다. 문자열 정렬 규칙(collation)이 glibc에 들어 있어서, 버전이 바뀌면 문자열 인덱스의 정렬 순서가 달라질 수 있다는 경고입니다.
+- 조치: 데이터를 지우지 않고 인덱스를 다시 만든 뒤 버전을 갱신했습니다.
+
+  ```bash
+  docker exec eval-agent-db psql -U eval -d eval_agent -c "REINDEX DATABASE eval_agent;" -c "ALTER DATABASE eval_agent REFRESH COLLATION VERSION;"
+  ```
+
+- 처음부터 새로 만드는 환경(볼륨 없음)에서는 이 경고가 나지 않습니다.
+
+Spring 비교: DB 벤더 확장을 쓰는 것이라, JPA 표준만으로는 안 되고 네이티브 쿼리나 Hibernate 커스텀 타입이 필요한 상황과 비슷합니다. Python에서는 `pgvector` 패키지가 SQLAlchemy용 `Vector` 타입과 거리 연산자를 제공합니다.
+
+## 2단계: 벡터 테이블 `policy_chunk`
+
+[rag/store.py](../src/eval_agent/rag/store.py)
+
+| 컬럼 | 내용 |
+|------|------|
+| `source`, `document`, `section` | 파일명, 문서 제목, 소제목 (검색 결과에 그대로 나감) |
+| `text` | 문단 본문 |
+| `embedding_model` | 어떤 모델로 만든 벡터인지 |
+| `embedding` | `vector(1024)` |
+
+정한 것
+
+- **평가 데이터와 다른 메타데이터(`VectorBase`)에 뒀습니다.** `seed.py --reset`과 테스트용 메모리 SQLite는 평가 테이블만 만들고 지웁니다. 벡터 테이블은 pgvector가 필요하고 생명주기도 다릅니다(문서가 바뀔 때만 다시 만듦).
+- **`embedding_model`을 함께 저장합니다.** 모델이 다르면 같은 문장도 전혀 다른 벡터가 나와서 서로 비교할 수 없습니다. 모델을 바꾸고 색인을 안 만들었으면 검색 시 이를 감지해 키워드 검색으로 돌아갑니다.
+- **벡터 인덱스(HNSW 등)는 만들지 않았습니다.** 20개면 전부 비교해도 즉시 끝납니다. 수만 건 이상이 되면 인덱스를 추가합니다.
+
+## 3단계: `Embedder` 인터페이스와 Voyage 구현체
+
+[rag/embedder.py](../src/eval_agent/rag/embedder.py)
+
+```python
+class Embedder(Protocol):
+    model: str
+    def embed_documents(self, texts: list[str]) -> list[list[float]]: ...
+    def embed_query(self, text: str) -> list[float]: ...
+```
+
+- 검색 코드는 "문장 → 벡터"만 알면 되고 어느 회사 모델인지는 모릅니다. 구현체는 `VoyageEmbedder`(실제)와 `FakeEmbedder`(테스트) 두 개입니다. 나중에 로컬 모델(bge-m3)을 비교하려면 구현체 하나만 추가하면 됩니다.
+- Spring 비교: `interface Embedder` + 구현 클래스입니다. 다른 점은 Python `Protocol`은 `implements`를 쓰지 않는다는 것입니다. 같은 모양의 메서드만 있으면 그 타입으로 인정됩니다(구조적 타이핑).
+- **문서용과 질문용 메서드를 나눈 이유:** Voyage는 `input_type="document"`/`"query"`를 받아서, 짧은 질문과 긴 문단을 같은 공간에서 비교하기 좋게 각각 다른 안내 문구를 붙여 임베딩합니다.
+- `create_embedder(settings)`: `VOYAGE_API_KEY`가 없으면 `None`을 돌려줍니다. 이때는 키워드 검색만 씁니다(키 없이도 프로젝트가 그대로 동작). 키는 있는데 `EMBEDDING_MODEL`이 없으면 설정 실수라서 바로 오류를 냅니다. 모델명을 코드에 박지 않는다는 기존 원칙(`ANTHROPIC_MODEL`)을 따랐습니다.
+
+## 4단계: 색인 스크립트
+
+[scripts/index_policy.py](../scripts/index_policy.py)
+
+```bash
+uv run python scripts/index_policy.py
+# policy_chunk: 20개 문단을 'voyage-4' 모델로 색인했습니다.
+```
+
+1. `CREATE EXTENSION IF NOT EXISTS vector`와 `policy_chunk` 테이블을 만듭니다.
+2. `docs/policy/*.md`를 `## 제목` 단위로 쪼갭니다. 키워드 검색과 같은 함수(`load_chunks`)를 써서 두 방식이 같은 문단 단위를 봅니다.
+3. 문단 20개를 한 번의 API 호출로 임베딩합니다. 이때 **문서 제목 + 소제목 + 본문**을 합쳐서 임베딩합니다. 본문에 "영업본부"라는 말이 없어도 소제목이 "1. 영업본부"면 그 절이 영업본부 질문과 가까워집니다.
+4. 기존 색인을 지우고 새로 넣습니다. 문서를 고쳤거나 모델을 바꿨을 때 다시 실행하면 됩니다.
+
+`seed.py`가 평가 데이터를 넣는다면, 이 스크립트는 검색용 벡터를 넣습니다.
+
+**문단 수 정정:** 처음에 문단을 18개로 셌는데 실제로는 20개입니다. `## 절` 18개 외에, 01·02 문서는 첫 절 앞에 개요 문장이 있어서 "개요" 문단으로 잡힙니다. 테스트를 돌려 보고 알았습니다.
+
+## 5단계: `search_policy_docs` 교체
+
+[tools/policy.py](../src/eval_agent/tools/policy.py)
+
+```
+search_policy_docs(query)
+ ├─ 임베더가 있으면 → 임베딩 검색 (method: "vector")
+ │    ├─ 현재 모델의 색인이 없음      → 키워드 검색 + fallback_reason
+ │    └─ API 오류, pgvector 없음 등  → 키워드 검색 + fallback_reason (서버 로그에 상세 원인)
+ └─ 임베더가 없으면 → 키워드 검색 (method: "keyword")
+```
+
+정한 것
+
+- **도구의 이름·파라미터·결과 모양을 바꾸지 않았습니다.** 에이전트(LangChain), MCP 서버, 시스템 프롬프트는 그대로이고, 도구를 만들 때 `embedder`만 넘겨줍니다. 결과에 `method` 필드가 추가돼서 어느 방식으로 찾았는지 보입니다.
+- **실패해도 검색은 계속됩니다.** Voyage API가 느리거나 장애가 나도 키워드 검색 결과는 돌려줍니다. LLM이 `fallback_reason`을 보고 상황을 알 수 있습니다.
+- **유사도 하한(`MIN_SIMILARITY = 0.3`):** 벡터 검색은 엉뚱한 질문에도 "그나마 가장 가까운 것"을 항상 돌려줍니다. "우주선 연료 보급"에 평가 문서가 나오면 안 되므로 하한을 두었습니다. 0.3은 임시값이고 7단계 비교 결과를 보고 정합니다.
+- **키워드 검색 쪽 코드는 pgvector를 import하지 않습니다.** 임베딩 관련 모듈은 실제로 쓸 때만 불러와서, 키 없이 쓰는 경우에 영향이 없습니다.
+- 도구 설명에서 "조사를 빼고 명사 위주로 쓴다"는 안내를 "짧은 문장이나 핵심 명사"로 바꿨습니다. 임베딩 검색은 문장 그대로 넣어도 됩니다.
+
+## 6단계: 테스트
+
+```bash
+uv run pytest                                              # 102개 통과, 3개 건너뜀 (DB·API 불필요)
+RUN_PG_TESTS=1 uv run pytest tests/test_vector_store_pg.py  # 실제 PostgreSQL + pgvector로 3개
+```
+
+| 테스트 | 확인하는 것 |
+|--------|-------------|
+| `test_tools_policy.py` (추가 3개) | 임베더가 없으면 `method: keyword` / 색인이 비었으면 키워드로 대체하고 이유를 알려줌 / DB 오류가 나도 키워드로 계속 |
+| `test_config.py` (추가 2개) | 키가 없으면 임베더 `None` / 키만 있고 모델명이 없으면 바로 오류 |
+| `test_vector_store_pg.py` (3개, 선택 실행) | 20개 문단 색인 / 코사인 거리 순으로 정렬되고 영업본부 질문에 예외 규정이 1위 / 다른 모델의 색인은 쓰지 않음 |
+
+- **가짜 임베더(`tests/fake_embedder.py`):** API를 부르지 않고 글자 2개 묶음(bigram)을 해시해 벡터를 만듭니다. 의미는 모르지만 "겹치는 글자가 많으면 가깝다"는 성질이 있어서 정렬과 저장 흐름을 검증하기에 충분합니다.
+- **PG 테스트는 실제 데이터를 건드리지 않습니다.** 트랜잭션 하나 안에서 테이블을 만들고 색인·검색한 뒤 rollback합니다. 실행 후 `policy_chunk` 테이블이 남지 않은 것을 확인했습니다.
+- **기본 `pytest`에서 PG 테스트를 건너뛰는 이유:** 기존 원칙대로 DB나 API 키 없이도 전체 테스트가 돌아가야 하기 때문입니다.
+
+## 7단계: 키워드 vs 임베딩 비교
+
+[scripts/compare_search.py](../scripts/compare_search.py)
+
+```bash
+uv run python scripts/index_policy.py      # 먼저 색인
+uv run python scripts/compare_search.py    # 준비된 6개 질문을 두 방식으로 비교
+uv run python scripts/compare_search.py "직접 넣고 싶은 질문"
+```
+
+| 질문 | 기대하는 1위 | 키워드 결과 | 임베딩 결과 |
+|------|-------------|-------------|-------------|
+| 영업본부 B등급 허용 상한 | 본부별 예외 / 1. 영업본부 | 정답 | 키 발급 후 |
+| 영업본부가 B를 많이 줘도 돼? | 본부별 예외 / 1. 영업본부 | **결과 없음** | 키 발급 후 |
+| 평가 결과가 억울하면 어떻게 해? | 보정·이의신청 / 3. 이의신청 | **오답** (1위 보정 회의, 이의신청은 3위 밖) | 키 발급 후 |
+| 팀원이 다섯 명뿐인 팀도 비율을 지켜야 해? | 등급 배분 / 5. 소규모 조직 | 정답 | 키 발급 후 |
+| 성과평가랑 역량평가 반영 비중 | 평가 유형과 반영 비율 / 2. 종합 점수 반영 비율 | 정답 | 키 발급 후 |
+| 우주선 연료 보급 일정 | (없음) | 결과 없음 (정답) | 키 발급 후 (`MIN_SIMILARITY` 확인) |
+
+키 발급 후 확인할 것
+
+- 2, 3번 질문에서 임베딩 검색이 정답을 찾는가 (이번 작업의 핵심)
+- 1, 4번처럼 키워드가 이미 잘 찾는 질문에서 임베딩이 나빠지지 않는가
+- 6번 무관한 질문의 유사도가 얼마인가 → `MIN_SIMILARITY`를 실제 값에 맞게 조정
+
+## 남은 한계
+
+- **임베딩은 질문마다 외부 API를 한 번 부릅니다.** 응답이 수백 ms 늘고, 키가 없거나 장애가 나면 키워드 검색으로 돌아갑니다.
+- **MCP 서버에서도 임베딩 검색을 쓰려면** Claude Desktop이 서버를 실행할 때 `.env`를 읽어야 합니다. 이 프로젝트는 `--directory`로 프로젝트 폴더에서 실행하므로 `.env`의 `VOYAGE_API_KEY`가 적용됩니다. 키를 넣은 뒤에는 Claude Desktop을 재시작해야 합니다.
+- **유사도 하한은 모델마다 다릅니다.** 모델을 바꾸면 `MIN_SIMILARITY`도 다시 확인해야 합니다.
+
+[README로 돌아가기](../README.md)

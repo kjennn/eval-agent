@@ -21,6 +21,9 @@ class Settings:
     anthropic_model: str
     agent_max_iterations: int
     agent_max_tokens: int = 2048  # LLM 답변 한 번의 최대 길이(토큰). 비용 상한 역할도 한다.
+    # 임베딩 검색(선택). 키가 비어 있으면 기준 문서 검색은 키워드 방식으로 동작한다.
+    voyage_api_key: str = ""
+    embedding_model: str = ""
 
 
 def get_settings() -> Settings:
@@ -37,4 +40,6 @@ def get_settings() -> Settings:
         anthropic_model=os.environ.get("ANTHROPIC_MODEL", ""),
         agent_max_iterations=int(os.environ.get("AGENT_MAX_ITERATIONS", "6")),
         agent_max_tokens=int(os.environ.get("AGENT_MAX_TOKENS", "2048")),
+        voyage_api_key=os.environ.get("VOYAGE_API_KEY", ""),
+        embedding_model=os.environ.get("EMBEDDING_MODEL", ""),
     )

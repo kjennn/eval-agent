@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:16
+    image: pgvector/pgvector:pg16  # PostgreSQL 16 + pgvector 확장 (임베딩 검색용)
     container_name: eval-agent-db
     environment:
       POSTGRES_USER: ${POSTGRES_USER}

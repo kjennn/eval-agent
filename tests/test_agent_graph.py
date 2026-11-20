@@ -155,10 +155,10 @@ def test_format_evidence는_None_인자를_생략한다():
     assert "- get_grade_distribution(year=2025)" in format_evidence(msgs)
 
 
-def test_도구_래퍼는_4개이고_이름과_설명이_있다(session_factory):
+def test_도구_래퍼는_5개이고_이름과_설명이_있다(session_factory):
     tools = build_tools(session_factory)
     assert [t.name for t in tools] == [
-        "get_grade_distribution", "compare_years", "get_org_summary", "search_policy_docs",
+        "get_grade_distribution", "compare_years", "get_org_summary", "search_policy_docs", "run_sql",
     ]
     assert all(len(t.description) > 20 for t in tools)
     # LLM에게 보이는 파라미터 스키마가 3단계 함수 시그니처와 같다

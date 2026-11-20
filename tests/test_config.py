@@ -18,3 +18,21 @@ def test_답변_최대_길이_기본값과_환경변수_override(monkeypatch):
 
     monkeypatch.setenv("AGENT_MAX_TOKENS", "4096")
     assert get_settings().agent_max_tokens == 4096
+
+
+def test_Voyage_키가_없으면_임베더는_None이다(monkeypatch):
+    from eval_agent.rag.embedder import create_embedder
+
+    monkeypatch.setenv("VOYAGE_API_KEY", "")
+    assert create_embedder(get_settings()) is None
+
+
+def test_키는_있는데_모델명이_없으면_바로_알린다(monkeypatch):
+    import pytest
+
+    from eval_agent.rag.embedder import create_embedder
+
+    monkeypatch.setenv("VOYAGE_API_KEY", "dummy-key")
+    monkeypatch.setenv("EMBEDDING_MODEL", "")
+    with pytest.raises(ValueError, match="EMBEDDING_MODEL"):
+        create_embedder(get_settings())
