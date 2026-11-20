@@ -2,6 +2,8 @@
 
 기준 문서 검색(`search_policy_docs`)을 키워드 검색에서 **임베딩(벡터) 검색**으로 바꾼 과정을 단계별로 적은 기록입니다. 브랜치는 `feature/embedding-search`입니다.
 
+실제로 임베딩 모델과 pgvector가 쓰였는지 확인하는 방법은 [임베딩 검색을 정말 썼는지 확인하는 법](verify-embedding-search.md)에 있습니다.
+
 | 단계 | 내용 | 상태 |
 |------|------|------|
 | 0 | Voyage AI 가입과 API 키 발급 | 사용자 진행 필요 |
