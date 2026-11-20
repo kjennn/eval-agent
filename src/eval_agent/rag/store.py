@@ -20,8 +20,10 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from eval_agent.rag.embedder import EMBEDDING_DIM, Embedder
 
 # 이 값보다 유사도가 낮으면 '관련 문단 없음'으로 본다. 벡터 검색은 무조건 가장 가까운 것을 돌려주므로,
-# 엉뚱한 질문("우주선 연료")에도 결과가 나오지 않게 하는 하한이다. 값은 비교 실험(7단계)으로 정한다.
-MIN_SIMILARITY = 0.3
+# 엉뚱한 질문("우주선 연료")에도 결과가 나오지 않게 하는 하한이다.
+# voyage-4로 잰 값(docs/embedding-search.md 7단계): 무관한 질문의 1위는 최고 0.322, 관련 질문의 1위는 최저 0.479.
+# 그 사이인 0.4로 둔다. 모델을 바꾸면 다시 재야 한다.
+MIN_SIMILARITY = 0.4
 
 
 class VectorBase(DeclarativeBase):
@@ -78,18 +80,31 @@ def vector_search(
     if not indexed:
         raise NotIndexedError(f"'{embedder.model}' 모델로 만든 색인이 없습니다. scripts/index_policy.py를 실행하세요.")
 
-    qvec = embedder.embed_query(query)
+    return search_by_vector(session, embedder.model, embedder.embed_query(query), top_k)
+
+
+def search_by_vector(
+    session: Session,
+    model: str,
+    qvec: list[float],
+    top_k: int = 3,
+    min_similarity: float = MIN_SIMILARITY,
+) -> list[dict[str, Any]]:
+    """이미 임베딩한 질문 벡터로 가까운 문단을 찾는다. (질문 임베딩과 DB 검색을 나눠 쓸 때)
+
+    min_similarity는 모델마다 알맞은 값이 다르다. 기본값은 voyage-4로 잰 값이다.
+    """
     distance = PolicyChunk.embedding.cosine_distance(qvec).label("distance")
     stmt = (
         select(PolicyChunk, distance)
-        .where(PolicyChunk.embedding_model == embedder.model)
+        .where(PolicyChunk.embedding_model == model)
         .order_by(distance)
         .limit(top_k)
     )
     results = []
     for chunk, dist in session.execute(stmt).all():
         similarity = 1 - float(dist)
-        if similarity < MIN_SIMILARITY:
+        if similarity < min_similarity:
             continue
         results.append(
             {

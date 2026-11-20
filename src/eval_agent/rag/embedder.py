@@ -28,6 +28,8 @@ class Embedder(Protocol):
 
     def embed_query(self, text: str) -> list[float]: ...
 
+    def embed_queries(self, texts: list[str]) -> list[list[float]]: ...
+
 
 class VoyageEmbedder:
     def __init__(self, api_key: str, model: str) -> None:
@@ -43,10 +45,14 @@ class VoyageEmbedder:
         return result.embeddings
 
     def embed_query(self, text: str) -> list[float]:
+        return self.embed_queries([text])[0]
+
+    def embed_queries(self, texts: list[str]) -> list[list[float]]:
+        # 질문 여러 개를 요청 한 번으로 임베딩한다. 요청 수 제한(결제 수단 미등록 시 분당 3회)을 아끼는 용도.
         result = self._client.embed(
-            [text], model=self.model, input_type="query", output_dimension=EMBEDDING_DIM
+            texts, model=self.model, input_type="query", output_dimension=EMBEDDING_DIM
         )
-        return result.embeddings[0]
+        return result.embeddings
 
 
 def create_embedder(settings: Settings) -> Embedder | None:
