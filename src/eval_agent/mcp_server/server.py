@@ -1,4 +1,4 @@
-"""MCP 서버: 3단계 도구 4개를 Claude Desktop / Claude Code가 직접 쓸 수 있게 노출한다.
+"""MCP 서버: 도구 5개(3단계 4개 + Text-to-SQL)를 Claude Desktop / Claude Code가 직접 쓸 수 있게 노출한다.
 
 에이전트(4~5단계)와의 차이
 - 에이전트: 우리가 LLM을 호출하고, LLM이 고른 도구를 우리가 실행한다. (API 비용은 우리 쪽에서 발생)
@@ -22,6 +22,7 @@ from eval_agent.tools import (
     compare_years,
     get_grade_distribution,
     get_org_summary,
+    run_sql,
     search_policy_docs,
 )
 from eval_agent.tools.descriptions import TOOL_DESCRIPTIONS
@@ -61,5 +62,10 @@ def create_server(session_factory: SessionFactory) -> MCPServer:
     @server.tool(name="search_policy_docs", description=TOOL_DESCRIPTIONS["search_policy_docs"])
     def _search_policy_docs(query: str) -> dict[str, Any]:
         return search_policy_docs(query)
+
+    @server.tool(name="run_sql", description=TOOL_DESCRIPTIONS["run_sql"])
+    def _run_sql(sql: str) -> dict[str, Any]:
+        with session_factory() as session:
+            return run_sql(session, sql)
 
     return server

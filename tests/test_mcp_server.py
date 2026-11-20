@@ -45,13 +45,14 @@ def list_tools(server):
     return asyncio.run(go())
 
 
-def test_도구_4개가_이름과_필수_파라미터와_함께_노출된다(server):
+def test_도구_5개가_이름과_필수_파라미터와_함께_노출된다(server):
     tools = {t.name: t for t in list_tools(server)}
-    assert set(tools) == {"get_grade_distribution", "compare_years", "get_org_summary", "search_policy_docs"}
+    assert set(tools) == {"get_grade_distribution", "compare_years", "get_org_summary", "search_policy_docs", "run_sql"}
     assert tools["get_grade_distribution"].input_schema["required"] == ["year"]  # org_name, eval_type은 선택
     assert tools["compare_years"].input_schema["required"] == ["org_name", "year_from", "year_to"]
     assert tools["get_org_summary"].input_schema["required"] == ["year", "org_name"]
     assert tools["search_policy_docs"].input_schema["required"] == ["query"]
+    assert tools["run_sql"].input_schema["required"] == ["sql"]
 
 
 def test_도구_설명은_에이전트와_MCP가_같은_문구를_쓴다(server, session_factory):
@@ -139,7 +140,7 @@ def test_실제_stdio_프로세스로_연결해서_도구를_호출한다(tmp_pa
             return [t.name for t in tools.tools], result
 
     names, result = asyncio.run(go())
-    assert len(names) == 4
+    assert len(names) == 5
     assert result.is_error is False
     assert result.structured_content["headcount"] == 80
     assert result.structured_content["avg_score_by_eval_type"]["다면"] > 0

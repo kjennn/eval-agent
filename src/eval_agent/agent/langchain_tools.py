@@ -24,6 +24,7 @@ from eval_agent.tools import (
     compare_years,
     get_grade_distribution,
     get_org_summary,
+    run_sql,
     search_policy_docs,
 )
 from eval_agent.tools.descriptions import TOOL_DESCRIPTIONS
@@ -58,4 +59,9 @@ def build_tools(session_factory: SessionFactory) -> list[BaseTool]:
     def _search_policy_docs(query: str) -> str:
         return _dump(search_policy_docs(query))
 
-    return [_get_grade_distribution, _compare_years, _get_org_summary, _search_policy_docs]
+    @tool("run_sql", description=TOOL_DESCRIPTIONS["run_sql"])
+    def _run_sql(sql: str) -> str:
+        with session_factory() as session:
+            return _dump(run_sql(session, sql))
+
+    return [_get_grade_distribution, _compare_years, _get_org_summary, _search_policy_docs, _run_sql]
